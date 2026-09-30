@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>日本神話・妖怪 古地図絵図</title>
+<style>
+/* ===== 色の設定（ここを変えると全体の色味を編集できます）===== */
+:root{
+  --paper:#f3e8c8;        /* ベージュ（紙） */
+  --paper-light:#fbf6e4;  /* 白に近い生成り */
+  --paper-dark:#dcc999;   /* 濃いベージュ */
+  --ink:#3a2a1a;          /* 墨 */
+  --ink-soft:#6b5236;
+  --gold:#e8b923;         /* 黄色（神様） */
+  --gold-deep:#b98a0f;
+  --white:#fffdf5;        /* 白（妖怪） */
+  --seal:#a8321f;         /* 落款の朱（タイトルの印のみ） */
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--paper-dark);color:var(--ink);
+  font-family:"Yu Mincho","Hiragino Mincho ProN","Noto Serif JP","Sawarabi Mincho",serif;
+  -webkit-tap-highlight-color:transparent}
+
+/* ===== 地図ビューポート ===== */
+#viewport{position:fixed;inset:0;overflow:hidden;cursor:grab;touch-action:none;
+  background:
+   radial-gradient(ellipse at center,transparent 55%,rgba(120,80,30,.35) 100%),
+   var(--paper);}
+#viewport.dragging{cursor:grabbing}
+#world{position:absolute;left:0;top:0;width:1200px;height:1000px;transform-origin:0 0;will-change:transform}
+#mapsvg{position:absolute;inset:0;width:100%;height:100%;display:block}
+
+/* ===== ピン ===== */
+.pin{position:absolute;width:0;height:0}
+.pin .dot{position:absolute;left:-14px;top:-14px;width:28px;height:28px;border-radius:50%;
+  border:2px solid var(--ink);display:flex;align-items:center;justify-content:center;
+  font-size:13px;font-weight:700;cursor:pointer;
+  box-shadow:1px 2px 3px rgba(58,42,26,.4);
+  transform:scale(var(--inv,1));transition:box-shadow .15s}
+.pin.yokai .dot{background:var(--white);color:var(--ink)}
+.pin.kami .dot{background:var(--gold);color:var(--ink)}
+.pin .dot:hover,.pin .dot:focus-visible{box-shadow:0 0 0 3px rgba(232,185,35,.7),1px 2px 3px rgba(58,42,26,.4);outline:none}
+.pin .tag{position:absolute;left:0;top:0;transform:translate(-50%,0) scale(var(--inv,1));
+  transform-origin:50% 0;margin-top:calc(16px * var(--inv,1));
+  white-space:nowrap;font-size:11px;padding:1px 5px;background:rgba(251,246,228,.92);
+  border:1px solid var(--ink-soft);border-radius:2px;pointer-events:none;opacity:0;transition:opacity .15s}
+.show-labels .pin .tag{opacity:1}
+.pin.hidden{display:none}
+
+/* ===== 地名ラベル ===== */
+.region-label{position:absolute;transform:translate(-50%,-50%) scale(var(--inv,1));
+  font-size:26px;letter-spacing:.35em;color:var(--ink-soft);opacity:.75;pointer-events:none;
+  text-shadow:0 0 6px var(--paper-light),0 0 6px var(--paper-light);white-space:nowrap}
+
+/* ===== UI ===== */
+.title{position:fixed;top:calc(12px + env(safe-area-inset-top,0px));left:12px;z-index:10;
+  background:rgba(251,246,228,.94);border:1px solid var(--ink);outline:1px solid var(--ink);outline-offset:3px;
+  padding:8px 16px 8px 14px;display:flex;align-items:center;gap:10px;max-width:calc(100vw - 100px)}
+.title h1{margin:0;font-size:1.05rem;letter-spacing:.18em;font-weight:700}
+.title .seal{width:26px;height:26px;background:var(--seal);color:#fff;font-size:13px;
+  display:flex;align-items:center;justify-content:center;border-radius:2px;flex:none}
+
+.ctrl{position:fixed;right:12px;bottom:calc(84px + env(safe-area-inset-bottom,0px));z-index:10;display:flex;flex-direction:column;gap:8px}
+.ctrl button,.filters button,.regions button,.refbtn{font-family:inherit;color:var(--ink);cursor:pointer;
+  background:rgba(251,246,228,.95);border:1px solid var(--ink)}
+.ctrl button{width:42px;height:42px;font-size:20px;border-radius:3px}
+.ctrl button:active,.filters button:active,.regions button:active{background:var(--gold)}
+
+.filters{position:fixed;top:calc(12px + env(safe-area-inset-top,0px));right:12px;z-index:10;display:flex;flex-direction:column;gap:6px}
+.filters button{padding:6px 10px;font-size:12px;border-radius:3px}
+.filters button[aria-pressed="true"]{background:var(--gold);font-weight:700}
+
+.regions{position:fixed;left:0;right:0;bottom:0;z-index:10;display:flex;gap:6px;overflow-x:auto;
+  padding:10px 12px calc(10px + env(safe-area-inset-bottom,0px));
+  background:linear-gradient(to top,rgba(243,232,200,.97) 70%,rgba(243,232,200,0));scrollbar-width:none}
+.regions::-webkit-scrollbar{display:none}
+.regions button{flex:none;padding:8px 14px;font-size:14px;border-radius:3px;letter-spacing:.1em}
+
+.legend{position:fixed;left:12px;bottom:calc(64px + env(safe-area-inset-bottom,0px));z-index:10;
+  background:rgba(251,246,228,.94);border:1px solid var(--ink-soft);padding:6px 10px;font-size:12px;line-height:1.7}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:50%;border:1.5px solid var(--ink);vertical-align:-2px;margin-right:4px}
+.legend .refbtn{display:block;margin-top:4px;padding:2px 6px;font-size:12px;border-radius:2px;width:100%}
+
+/* ===== 詳細シート ===== */
+#sheetBack{position:fixed;inset:0;z-index:30;background:rgba(58,42,26,.45);display:none;
+  align-items:flex-end;justify-content:center}
+#sheetBack.open{display:flex}
+.sheet{width:100%;max-width:640px;max-height:82vh;overflow-y:auto;
+  background:var(--paper-light);border:2px solid var(--ink);outline:1px solid var(--ink);outline-offset:-7px;
+  padding:26px 24px calc(28px + env(safe-area-inset-bottom,0px));position:relative;
+  animation:up .22s ease-out}
+@keyframes up{from{transform:translateY(24px);opacity:0}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){.sheet{animation:none}}
+@media (min-width:700px){#sheetBack{align-items:center}.sheet{border-radius:2px}}
+.sheet .x{position:absolute;top:8px;right:10px;width:40px;height:40px;font-size:26px;background:none;border:0;color:var(--ink);cursor:pointer}
+.sheet h2{margin:0 0 8px;font-size:1.6rem;letter-spacing:.06em;padding-right:36px}
+.badge{display:inline-block;font-size:12px;padding:1px 10px;border:1px solid var(--ink);margin-right:8px;border-radius:2px}
+.badge.kami{background:var(--gold)}
+.badge.yokai{background:var(--white)}
+.sheet dl{margin:0}
+.sheet dt{font-weight:700;margin:14px 0 4px;padding-left:8px;border-left:4px solid var(--gold-deep)}
+.sheet dd{margin:0;line-height:1.85;font-size:1rem;padding-left:12px}
+.illust{margin:16px 0 0;padding:10px;background:var(--paper);border:1px solid var(--ink-soft);text-align:center}
+.illust img{max-width:100%;max-height:220px;object-fit:contain}
+.illust figcaption{font-size:.8rem;margin-top:6px;color:var(--ink-soft);word-break:break-all}
+.illust a,.sheet a{color:#6a4a10}
+.refs li{margin-bottom:8px;line-height:1.7}
+.hint{position:fixed;left:50%;top:calc(70px + env(safe-area-inset-top,0px));transform:translateX(-50%);z-index:9;
+  background:rgba(58,42,26,.85);color:var(--paper-light);font-size:12px;padding:5px 14px;border-radius:14px;
+  pointer-events:none;transition:opacity .6s;white-space:nowrap}
+</style>
+</head>
+<body>
+
+<div id="viewport" aria-label="日本の神話・妖怪の古地図。ドラッグで移動、ピンチやボタンで拡大縮小">
+  <div id="world">
+    <svg id="mapsvg" viewBox="0 0 1200 1000" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <filter id="paper" x="0" y="0" width="100%" height="100%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.012 0.02" numOctaves="4" seed="7" result="n"/>
+          <feColorMatrix in="n" type="matrix" values="0 0 0 0 0.55  0 0 0 0 0.40  0 0 0 0 0.18  0 0 0 0.55 -0.12"/>
+        </filter>
+        <filter id="wobble" x="-5%" y="-5%" width="110%" height="110%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="2" seed="3" result="t"/>
+          <feDisplacementMap in="SourceGraphic" in2="t" scale="9"/>
+        </filter>
+        <pattern id="wave" width="46" height="26" patternUnits="userSpaceOnUse">
+          <path d="M2 14 q5 -8 10 0 t10 0 t10 0 t10 0" fill="none" stroke="#a8916a" stroke-width="1.1" opacity=".55"/>
+        </pattern>
+        <radialGradient id="land" cx="50%" cy="50%" r="70%">
+          <stop offset="0" stop-color="#fffbe8"/><stop offset="1" stop-color="#f2dd9c"/>
+        </radialGradient>
+        <path id="hokkaido" d="M868 176 L900 140 L936 138 L960 104 L1000 96 L1034 124 L1076 140 L1090 168 L1058 190 L1030 186 L1004 212 L1010 240 L972 252 L940 232 L912 246 L884 226 L872 204 Z"/>
+        <path id="honshu" d="M872 292 L902 282 L930 306 L944 352 L936 402 L952 440 L972 470 L950 506 L918 520 L890 508 L862 520 L830 542 L790 552 L748 574 L706 598 L662 594 L626 578 L584 590 L534 596 L488 594 L446 596 L410 580 L398 556 L424 540 L470 546 L520 536 L560 518 L600 504 L636 500 L664 474 L700 450 L724 424 L756 412 L780 388 L792 356 L818 328 L846 300 Z"/>
+        <path id="shikoku" d="M470 640 L520 622 L580 626 L632 640 L650 660 L616 680 L560 676 L512 672 L476 662 Z"/>
+        <path id="kyushu" d="M296 618 L336 606 L372 618 L396 650 L394 690 L372 726 L342 748 L316 736 L300 704 L282 672 L284 640 Z"/>
+      </defs>
+
+      <rect width="1200" height="1000" fill="#f3e8c8"/>
+      <rect width="1200" height="1000" filter="url(#paper)"/>
+      <rect width="1200" height="1000" fill="url(#wave)"/>
+
+      <rect x="18" y="18" width="1164" height="964" fill="none" stroke="#3a2a1a" stroke-width="3"/>
+      <rect x="28" y="28" width="1144" height="944" fill="none" stroke="#3a2a1a" stroke-width="1"/>
+
+      <g filter="url(#wobble)">
+        <g fill="none" stroke="#a8916a" stroke-width="14" stroke-linejoin="round" opacity=".35">
+          <use href="#hokkaido"/><use href="#honshu"/><use href="#shikoku"/><use href="#kyushu"/>
+        </g>
+        <g fill="url(#land)" stroke="#3a2a1a" stroke-width="2.6" stroke-linejoin="round">
+          <use href="#hokkaido"/><use href="#honshu"/><use href="#shikoku"/><use href="#kyushu"/>
+        </g>
+        <g fill="none" stroke="#6b5236" stroke-width="1.6" opacity=".7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M880 340 l10 -18 l10 18 m6 6 l10 -16 l10 16"/>
+          <path d="M760 470 l10 -18 l10 18 m8 4 l12 -20 l12 20 m8 6 l9 -15 l9 15"/>
+          <path d="M916 210 l8 -14 l8 14 m10 4 l9 -15 l9 15"/>
+          <path d="M640 548 l9 -15 l9 15"/>
+          <path d="M345 660 l9 -15 l9 15"/>
+          <path d="M540 646 l8 -13 l8 13 m10 3 l8 -13 l8 13"/>
+          <path d="M822 380 l8 -14 l8 14 m10 8 l9 -15 l9 15"/>
+        </g>
+      </g>
+
+      <!-- 沖縄（別枠） -->
+      <g transform="translate(120 800)">
+        <rect x="0" y="0" width="230" height="150" fill="rgba(251,246,228,.55)" stroke="#3a2a1a" stroke-width="1.6" stroke-dasharray="7 4"/>
+        <g filter="url(#wobble)" fill="url(#land)" stroke="#3a2a1a" stroke-width="2">
+          <path d="M120 40 L146 32 L160 52 L140 78 L120 96 L100 110 L88 96 L104 74 Z"/>
+          <path d="M40 120 L66 112 L74 128 L52 136 Z"/>
+          <path d="M182 118 L200 110 L206 126 L188 132 Z"/>
+        </g>
+        <text x="115" y="16" text-anchor="middle" font-size="13" fill="#3a2a1a" letter-spacing="4">琉球諸島</text>
+      </g>
+
+      <!-- 方位記号 -->
+      <g transform="translate(1060 800)" stroke="#3a2a1a" fill="none">
+        <circle r="56" stroke-width="1.5"/><circle r="44" stroke-width=".8"/>
+        <path d="M0 -84 L12 0 L0 84 L-12 0 Z" fill="#fffbe8" stroke-width="1.6"/>
+        <path d="M-84 0 L0 -12 L84 0 L0 12 Z" fill="#e8b923" fill-opacity=".85" stroke-width="1.6"/>
+        <g fill="#3a2a1a" stroke="none" font-size="20" text-anchor="middle">
+          <text y="-92">北</text><text y="112">南</text><text x="102" y="7">東</text><text x="-102" y="7">西</text>
+        </g>
+      </g>
+
+      <g fill="#6b5236" font-size="22" letter-spacing="14" opacity=".7" text-anchor="middle">
+        <text x="230" y="430" transform="rotate(-8 230 430)">日本海</text>
+        <text x="1010" y="640" transform="rotate(-18 1010 640)">太平洋</text>
+        <text x="560" y="780">東シナ海</text>
+      </g>
+
+      <!-- 題箋 -->
+      <g transform="translate(70 70)">
+        <rect width="250" height="112" fill="#fbf6e4" stroke="#3a2a1a" stroke-width="2"/>
+        <rect x="6" y="6" width="238" height="100" fill="none" stroke="#3a2a1a" stroke-width=".8"/>
+        <text x="125" y="46" text-anchor="middle" font-size="26" letter-spacing="7" fill="#3a2a1a">日本神話</text>
+        <text x="125" y="84" text-anchor="middle" font-size="26" letter-spacing="7" fill="#3a2a1a">妖怪繪圖</text>
+      </g>
+    </svg>
+    <div id="labels"></div>
+    <div id="pins"></div>
+  </div>
+</div>
+
+<div class="title"><span class="seal">図</span><h1>日本神話・妖怪 古地図</h1></div>
+
+<div class="filters" role="group" aria-label="表示の切り替え">
+  <button data-f="all" aria-pressed="true">すべて</button>
+  <button data-f="kami" aria-pressed="false">神様</button>
+  <button data-f="yokai" aria-pressed="false">妖怪</button>
+  <button id="lblToggle" aria-pressed="false">名前</button>
+</div>
+
+<div class="legend">
+  <div><i style="background:var(--gold)"></i>神様　<i style="background:var(--white)"></i>妖怪</div>
+  <button class="refbtn" id="refBtn">参考資料</button>
+</div>
+
+<div class="ctrl">
+  <button id="zin" aria-label="拡大">＋</button>
+  <button id="zout" aria-label="縮小">－</button>
+  <button id="zreset" aria-label="全体表示">⟲</button>
+</div>
+
+<nav class="regions" id="regionNav" aria-label="地方へ移動"></nav>
+<div class="hint" id="hint">ドラッグで移動・ピンチで拡大　ピンをタップで詳細</div>
+
+<div id="sheetBack"><div class="sheet" id="sheet" role="dialog" aria-modal="true"></div></div>
+
+<script>
+/* =====================================================================
+   データ編集エリア
+   ・REGIONS … 各地方の中心座標(x,y)と広がり(r)。地図は 1200×1000 の座標
+   ・DATA    … [種類, 名前, 場所, 内容, 誕生経緯, (任意)画像URL, 出典名, 出典URL]
+   イラストを追加する場合は、配列の後ろに 画像URL・出典名・出典URL を足してください。
+   ===================================================================== */
+const REGIONS = {
+  "北海道":{x:966,y:172,r:58},
+  "東北":  {x:880,y:385,r:66},
+  "関東":  {x:896,y:474,r:46},
+  "中部":  {x:760,y:480,r:70},
+  "近畿":  {x:622,y:552,r:48},
+  "中国":  {x:492,y:566,r:58},
+  "四国":  {x:556,y:648,r:44},
+  "九州":  {x:340,y:672,r:56},
+  "沖縄":  {x:236,y:870,r:66}
+};
+
+const DATA = {
+"北海道":[
+["妖怪","アコロカムイ","噴火湾（内浦湾）周辺","巨大なタコのような巨大海洋生物。船を丸呑みにする巨大さを持ち、赤く巨大な体が海面を覆い尽くすとされる。","アイヌ民話において、海の巨大生物や奇怪な現象への畏怖が具現化したもの。"],
+["妖怪","アイヌラックル（妖怪としての伝承側面）","北海道全域","基本的には英雄神だが、地域によっては悪霊や化け物（ウェンカムイ）退治の物語において、異形の敵として語り継がれる場合がある。","自然の脅威や不可解な災害を英雄と対峙する存在として例えたことから生じた。"],
+["妖怪","パヨカカムイ","北海道各地域","人々に流行病や悪病をもたらす病魔・魔物。黒い影のような姿や醜い老婆の姿で現れるとされる。","集団感染などの病気の恐怖を可視化し、予防や禁忌を守らせるために語られた。"],
+["妖怪","ケナシコログル","北海道の森林地域","草むらや茂みに潜むとされる怪異。人を迷わせたり、不気味な音を立てて驚かせたりする。","未開拓の深い森に対する恐怖や道迷いの現象から生まれた。"],
+["妖怪","イワオロペネレプ","北海道の山岳地帯","山に棲む巨大な魔鳥。鋭いクチバシと爪を持ち、人や家畜を襲うとされる。","険しい山々の威容や大型猛禽類への畏怖から派生した伝説。"],
+["神様","カムイチカプ（シマフクロウの神）","北海道全域","コタン（集落）を護る村護りの神。夜間に音もなく飛び、人々に異変を知らせる。","アイヌの人々がシマフクロウの夜行性や観察力の高さに感謝し、保護神として崇めた。"],
+["神様","アペフチカムイ（火の神）","北海道各地域の囲炉裏","囲炉裏の火に宿る女性の神。神々への祈りを届ける仲介者であり、家庭の安全を見守る。","厳しい寒さの北海道において、暖や調理に不可欠な「火」を敬う信仰から誕生。"],
+["神様","キムンカムイ（ヒグマの神）","北海道の山林","山を支配する高位の神。肉と皮（毛皮）を人々に与えるために下界へ現れるとされる。","山の恵みと命の尊厳に対する感謝と祈りから生まれた。"],
+["神様","レプンカムイ（シャチの神）","北海道沿岸部","海の沖合を司る神。クジラなどを浜に追い込み、人々に恵みをもたらす福の神。","シャチが集団で獲物を追う習性や、海洋の恵みへの感謝から信仰された。"],
+["神様","ハシナウカムイ（狩猟の神）","北海道の山林","山での狩猟の成否を司る女神。弓矢や獲物の授与を司る。","安定した食料確保を祈願する狩猟採集生活の中から生まれた。"]
+],
+"東北":[
+["妖怪","座敷わらし","岩手県を中心とする東北地方","家の座敷に住み着く子供の姿をした妖怪。居着いた家は繁栄し、去ると衰退すると言われる。","家の盛衰や、過去の貧困による乳幼児の早世に対する切ない思いが背景にあるとされる。"],
+["妖怪","なまはげ","秋田県男鹿市","鬼の面をかぶり、怠け者を戒めたり無病息災を祈ったりして家々を訪れる怪異・来訪神的な妖怪。","冬の厳しい気候のなか、年の節目に規律を守らせるための風習から生じた。"],
+["妖怪","遠野の天狗","岩手県遠野市","山中に棲み、空中を飛び回り、不審な音を立てたり人をさらったりする山伏姿の怪異。","修験道の修験者の姿や、深山における神隠し現象への恐怖から生まれた。"],
+["妖怪","雪女","青森県・秋田県など","吹雪の夜に現れる白い肌の美しい女性の妖怪。吐息で人を凍りつかせる。","極寒の雪国における遭難現象や吹雪の恐ろしさが人物化された。"],
+["妖怪","黒塚の鬼婆（安達ヶ原の鬼婆）","福島県二本松市（安達ヶ原）","旅人を宿に泊め、寝ている隙に取って食うとされる恐ろしい老女の妖怪。","荒涼とした原野への畏怖や、旅の危険性を伝える教訓として伝承された。"],
+["神様","オシラサマ","岩手県・青森県など","家の神・養蚕の神・馬の神。桑の木で作られたペアの人形に布を重ねて祀る。","娘と馬の悲恋説話（馬頭観音説話）を起源とし、家庭の幸福や養蚕の成功を祈って生まれた。"],
+["神様","アラハバキ（荒脛巾神）","東北地方各地","古代より祀られる謎多き地主神。足腰の病気平癒や旅の安全の神として信じられている。","大和王権以前の先住信仰や、金属採掘・精錬に関わる信仰が起源とされる。"],
+["神様","志波彦神（シワヒコノカミ）","宮城県塩竈市","産業開発や農耕の成功を守護する地方開拓の神。","東北地方の開拓史において、地域農業の発展を祈願して祀られた。"],
+["神様","醸造の神（高龗神・ヤマツミ系）","秋田県など酒造地帯","美味しい水と酒造りを見守る神。","清らかな水資源に恵まれた東北の酒造文化とともに発展した。"],
+["神様","早池峰の大神（瀬織津姫）","岩手県早池峰山","水や祓い、山岳を司る清らかな女神。","山岳信仰と川の源流への感謝から、修験道と融合して祀られた。"]
+],
+"関東":[
+["妖怪","小豆洗い（あずきあらい）","東京都・神奈川県など","川のほとりで「ショキショキ」と小豆を洗う音を立てる妖怪。姿は見えないことが多い。","夜の川のせせらぎや風の音が、小豆を洗う音に聞こえたことから生じた。"],
+["妖怪","鎌いたち","埼玉県・千葉県など","風に乗って現れ、刃物のようなもので人に噛みつき無痛で傷を負わせる妖怪。","かまいたち現象（皮膚が裂ける自然現象）や越冬時の乾燥肌の傷を妖怪の仕業とした。"],
+["妖怪","大頭（おおあたま）","東京都（江戸）","夜道に突然現れ、巨大な頭部だけを突き出して人を驚かせる妖怪。","暗い路地裏の影や視覚的錯覚、都市の噂話として広まった。"],
+["妖怪","見越入道（みこしにゅうどう）","関東全域","見上げれば見上げるほど背が高くなる大入道の妖怪。","見上げる動作による眩暈や、闇の中に佇む樹木の影から生じた。"],
+["妖怪","河童（カッパ）","茨城県（牛久沼など）","水辺に棲み、頭の皿が乾くと力を失う。相撲を好み、人を水中に引き込むこともある。","水難事故の防止や、水辺の自然災害に対する警鐘から生まれた。"],
+["神様","平将門公（神格化）","東京都千代田区（神田神社など）","江戸・東京の勝負運や厄除け、地域防衛の守護神。","平安時代の武将・平将門の怨霊を鎮めるため御霊信仰として祀られ、守護神となった。"],
+["神様","武蔵御嶽神社の大口真神（おいぬ様）","東京都青梅市","ニホンオオカミが神格化した神。盗難除けや魔除けの効験がある。","害獣（イノシシなど）を退治するオオカミへの感謝と畏怖から生まれた。"],
+["神様","鹿島神宮の武甕槌大神（タケミカヅチ）","茨城県鹿嶋市","武術・決断力・地震鎮め（要石）を司る強大な武神。","大和王権の東国制圧の拠点として、最強の武神が祀られた。"],
+["神様","香取神宮の経津主神（フツヌシ）","千葉県香取市","剣の神であり、国家安泰や開運を司る武神。","鹿島神宮とともに東国の防衛・開発の象徴として祀られた。"],
+["神様","日光山の大権現","栃木県日光市","山岳信仰と神仏習合が合体した山神。","勝道上人による日光山開山と修験道の発展により生まれた。"]
+],
+"中部":[
+["妖怪","輪入道","石川県など","燃え盛る牛車の車輪の中央に恐ろしい男の顔がある妖怪。見ると魂を抜かれるとされる。","車輪の軋み音や火災の恐怖、悪事への戒めとして伝承された。"],
+["妖怪","すねこすり","静岡県など","雨の降る夜道で、歩く人のすねの間にまとわりついて歩きにくくする小動物状の妖怪。","夜道の歩きにくさや濡れたぬかるみで足をとられる現象を妖怪に擬した。"],
+["妖怪","てんじょうさがり","愛知県など","夜中に天井からぶら下がって降りてきて、寝ている人を覗き込む妖怪。","天井のシミや暗がりに対する子供の恐怖心から生まれた。"],
+["妖怪","あずきばばあ","長野県など","山奥で小豆を研ぎ、恐ろしい声で笑いながら人を誘い込む老婆の妖怪。","山奥へ不用意に入り込むことを防ぐための怪談。"],
+["妖怪","一本ダタラ","岐阜県・飛騨地方など","一本足で一つ目の巨大な妖怪。山中で怪音を響かせる。","炭焼きや鉱山労働者の過酷な労働環境（片目・片脚の職業病）や山神信仰が背景にある。"],
+["神様","諏訪大社の建御名方神（タケミナカタ）","長野県諏訪市","風・水・農耕・武勇を司る強力な大神。","国譲り神話で諏訪に逃れた天津神・国津神の葛藤と、地主神との融合から誕生。"],
+["神様","富士山本宮浅間大社の木花之佐久夜毘売（コノハナノサクヤヒメ）","静岡県富士宮市","美と繁栄、火難除け、安産を司る富士山の女神。","噴火を繰り返す富士山の怒りを鎮める鎮火の神として祀られた。"],
+["神様","熱田神宮の熱田大神（草薙神剣）","愛知県名古屋市","三種の神器の一つ「草薙剣」を神体とする国家・皇室守護の神。","ヤマトタケル伝説とともに、武勇の象徴として奉斎された。"],
+["神様","白山比咩神社（菊理媛尊）","石川県白山市","縁結びや和合、白山（霊峰）を司る女神。","加賀の霊峰・白山に対する山岳信仰から生まれた。"],
+["神様","秋葉山本宮の秋葉権現（迦具土神）","静岡県浜松市","火災を防ぐ防火・鎮火の神。","木造建築が多い日本において、火災被害を防ぐ切実な祈りから全国に広まった。"]
+],
+"近畿":[
+["妖怪","酒呑童子（しゅてんどうじ）","京都府（大江山）","鬼の頭領。京の都から姫君たちをさらって乱暴を働いたが、源頼光らに退治された。","都に従わなかった地方勢力や山賊への畏怖と政権側の正当化から生まれた。"],
+["妖怪","ぬらりひょん","和歌山県・大阪府など","忙しい夕方などに家へ勝手に入り込み、茶を飲んで寛ぐ妖怪の総大将格。","人の隙を突く怪現象や、集落のうやむやな人間関係の象徴。"],
+["妖怪","百鬼夜行の怪（ぬっぺふほふ等）","京都府京都市（一条通）","夜間に妖怪たちが集団で練り歩く現象。遭遇すると死ぬとされる。","平安京の夜の闇や、使い古された道具が化ける付喪神思想から生じた。"],
+["妖怪","橋姫","京都府宇治市（宇治橋）","嫉妬の狂気によって鬼と化した女性の妖怪。橋を守る一方で嫉妬深い者をたたる。","橋を異界との境界とする信仰や、男女の情念説話から生まれた。"],
+["妖怪","牛鬼（うしおに）","三重県・和歌山県（熊野）","頭が牛で体が蜘蛛のような恐ろしい海・川の怪異。人を襲い影を喰らう。","沿岸部の荒波や険しい水域の危険性を象徴して生まれた。"],
+["神様","天照大御神（アマテラスオオミカミ）","三重県伊勢市（伊勢神宮）","皇室の祖神であり、太陽・日本全体を照らす最高神。","稲作に不可欠な太陽への自然崇拝と、古代国家の統合の象徴として誕生。"],
+["神様","伏見稲荷大社の宇迦之御魂神（ウカノミタマ）","京都府京都市","五穀豊穣、商売繁盛、産業興隆を司るお稲荷様。","渡来系氏族秦氏による農耕神の奉斎から始まり、全国へ普及した。"],
+["神様","熊野三所権現","和歌山県（熊野三山）","浄土への入口とされ、復活と再生を司る神々（神仏習合の霊場）。","深い山々の自然信仰と修験道、浄土信仰が融合して誕生。"],
+["神様","春日大社の武甕槌命・経津主命ほか","奈良県奈良市","藤原氏の氏神。藤原氏の繁栄と平城京の保全を司る。","藤原氏の勢力拡大に際し、常陸や下総から神々を勧請して創建。"],
+["神様","大神神社の大物主大神（オオモノヌシ）","奈良県桜井市（三輪山）","三輪山そのものを神体とし、国家造り・国造り・酒造・薬学を司る。","建造物の社殿を持たない、最古級の自然山岳崇拝の形。"]
+],
+"中国":[
+["妖怪","一反木綿（いったんもめん）","鳥取県・島根県など","長さ約10メートルの白い布のような妖怪。夜空を飛んで人の首に巻き付く。","暗闇で干してあった布が風で飛んできた恐怖や子供への夜出注意から生じた。"],
+["妖怪","砂かけばばあ","鳥取県など","寂しい神社や竹林の近くで、通行人にバラバラと砂をふりかける老婆の妖怪。","風で竹林や木々から落ちる砂粒の音や気配を不気味に感じたことから生まれた。"],
+["妖怪","たくろう火","広島県","海の上に現れる怪火。船に近づいて火を灯したり火災を引き起こしたりする。","不知火やセントエルモの火といった海洋の自然発光現象への恐怖から。"],
+["妖怪","浪小僧（なみこぞう）","山口県・島根県沿岸","波間から現れ、雨の予兆や時化（しけ）を音で知らせる小僧姿の妖怪。","波の音の変化による気象予測の知恵が妖怪化したもの。"],
+["妖怪","隠し神（かかくし）","岡山県など","子供を不意にさらって姿を消してしまう妖怪。","子供の行方不明（川での事故や迷子）を説得力ある理由として説明するために誕生。"],
+["神様","出雲大社の大国主大神（オオクニヌシ）","島根県出雲市","国造りを行った神。目に見えない「縁（えにし）」を司る結びの最高神。","出雲地方の古代勢力の神話と、大和王権への国譲り神話から誕生。"],
+["神様","厳島神社の市杵島姫命（イチキシマヒメ）","広島県廿日市市（宮島）","海の安全、交通、芸能、財運を司る美しい海の女神。","瀬戸内海の海上交通の要衝である宮島を神の島として祀ったことに由来。"],
+["神様","吉備津神社の吉備津彦命（キビツヒコ）","岡山県岡山市","温羅（ウラ）という鬼を退治した武神。桃太郎伝説のモデルとされる。","大和朝廷による吉備国支配と、地域豪族の平定歴史が神話化。"],
+["神様","金刀比羅宮の大物主神（中国・四国で信仰）","瀬戸内沿岸部一帯","航海安全・大漁満足を司る海の神。","瀬戸内海を行き交う船乗りたちの安全祈願から盛んになった。"],
+["神様","素戔嗚尊（スサノオノミコト）","島根県安来市・雲南市など","ヤマタノオロチを退治した荒ぶる神。治水や災厄除けを司る。","斐伊川の暴れ川（洪水）の治水事業と製鉄（たたら製鉄）文化が背景にある。"]
+],
+"四国":[
+["妖怪","犬神（いぬがみ）","高知県・徳島県など","人に憑依して病気にさせたり狂わせたりする憑物（つきもの）の呪術的妖怪。","呪術師による犬を用いた忌まわしい呪詛儀礼や、家格・貧富の差の言い訳として形成された。"],
+["妖怪","子泣き爺（こなきじじい）","徳島県三好市","赤ん坊の泣き声を上げて山道に転がり、拾い上げた人間にとびつき石のように重くなって押し潰す。","山奥での怪音現象や、険しい山道での疲労・危険防止の警告から生まれた。"],
+["妖怪","袖引小僧（そでひきこぞう）","愛媛県など","夕暮れ時に道を歩いていると、後ろから着物の袖をクイックイッと引っ張る姿なき妖怪。","道端の草木が服に引っかかる感覚や、寂しさからの幻覚から生じた。"],
+["妖怪","油すまし","徳島県・愛媛県（熊本など西日本に広く分布）","蓑を着た地蔵のような姿の妖怪。山道で「今もすまし（油）がいるか」と声をかける。","油採集の労働や山道の奇妙な気配から生まれた。"],
+["妖怪","カッパ（芝天狗・柴天狗）","高知県（四万十川流域）","川や山を行き来し、人間に相撲を挑んだり悪戯をしたりする妖怪。","豊かな清流と深い山々が隣接する四国の自然環境が生み出した。"],
+["神様","石鎚神社（石鎚毘古命）","愛媛県西条市","四国最高峰・石鎚山を神体とし、願望成就や家内安全を司る。","鋭利な岩峰を持つ石鎚山への修験道的崇拝から生じた。"],
+["神様","大山祇神社の大山積神（オオヤマツミ）","愛媛県今治市（大三島）","日本全体の山々・海・武運を司る強大な総鎮守。","海の要衝である大三島に鎮座し、数々の武将から兜や鎧が奉納されて発展。"],
+["神様","金刀比羅宮の大物主神","香川県琴平町","海の守護神。「さぬきのこんぴらさん」として全国の船乗りから信仰される。","象頭山への修験道と海難防止の祈願が合一して巨大化した。"],
+["神様","土佐神社（一言主神・味鋤高彦根神）","高知県高知市","土佐国の開拓と風調雨順、産業開発を守護する神。","土佐の風土開拓にあたり、地域住民の生活安定のために祀られた。"],
+["神様","阿波の麻比古神（麻植の神）","徳島県","麻の栽培や織物、産業振興を司る開拓神。","古代阿波忌部氏（いんべし）による麻の栽培・朝廷への奉納史に基づく。"]
+],
+"九州":[
+["妖怪","油赤子（あぶらあかご）","滋賀県伝承もあるが、九州沿岸等にも分布","行灯（あんどん）の菜種油を舐めとる赤ん坊の妖怪。火の玉から変化する。","貴重品だった油をネズミなどが舐める音や、火の玉の目撃例から誕生。"],
+["妖怪","塗坊（ぬりぼう）","熊本県など","夜道で目の前に立ちはだかり、進路を塞いで壁のようになる妖怪（塗壁の同類）。","夜間の視界不良による感覚麻痺や道迷いから生じた。"],
+["妖怪","磯女（いそおんな）","福岡県・長崎県・熊本県などの沿岸","上半身は美しく下身は不気味な妖怪。海岸で人を呼び寄せ血を吸う。","磯遊びや夜間漁業での水難事故・荒波の危険に対する警告。"],
+["妖怪","ガタロ（河童の一種）","福岡県（筑後川など）","河童の一種。川に入った子供を水中に引き込む。","大河の急流での水死事故防止のための言い伝え。"],
+["妖怪","山童（やまわろ）","熊本県・長崎県など","冬になると山に入り、夏になると川に戻って河童（ガラッパ）になるとされる妖怪。","季節による労働（山林労働と漁労）の変化と自然現象が結びついた。"],
+["神様","太宰府天満宮の菅原道真公（天神様）","福岡県太宰府市","学問・誠実・厄除けを司る至高の神様。","無実の罪で左遷され没した道真の祟りを恐れ、慰霊と学徳の称賛のために創建。"],
+["神様","高千穂神社・天岩戸神社の天照大神・八百万の神","宮崎県高千穂町","天孫降臨や天岩戸隠れ神話の舞台。開運・願望成就を司る。","日向神話の舞台として、天孫降臨の史実的・伝承的記憶から祀られた。"],
+["神様","霧島神宮のニニギノミコト（瓊瓊杵尊）","鹿児島県霧島市","地上を治めるために天から降臨した神。国家安泰・開運。","霧島連山の火山信仰と天孫降臨神話が組み合わさって誕生。"],
+["神様","宇佐神宮の応神天皇（八幡大神）","大分県宇佐市","全国の八幡神社（武運・安産・殖産）の総本社。","渡来文化や仏教受容と古来の神道が融合し、強力な国家守護神となった。"],
+["神様","阿蘇神社の健磐龍命（タケイワタツノミコト）","熊本県阿蘇市","阿蘇山のカルデラを開拓し、農業を教えたとされる開拓神。","巨大火山・阿蘇山の鎮火祈願と、周囲の農地の開発歴史から生まれた。"]
+],
+"沖縄":[
+["妖怪","キジムナー","沖縄県全域","ガジュマルの古い巨木に棲む赤髪の子供の妖怪。魚の目が好物で、親しくなると富をもたらすが、怒らせると家を滅ぼす。","ガジュマルの木に対する畏敬の念や、奇妙な怪現象・漁の成否から生まれた。"],
+["妖怪","アカマタ・クロマタ（妖怪的伝承側面）","八重山諸島","異界（ニライカナイ）から訪れる異形の怪異・仮面神。むやみに覗くと目が潰れるなどの祟りがあるとされる。","秘祭儀礼と異界からの訪問者に対する強い畏怖から伝承された。"],
+["妖怪","マジムン","沖縄県全域","人間を驚かせたり病気にさせたりする悪霊や妖怪の総称。股をくぐられると死ぬとされる。","原因不明の病気や災難、死者への恐怖から生じた概念。"],
+["妖怪","片足ピンザ（片足のヒージャー）","宮古島など","夜道に現れる片足しかないヤギの妖怪。遭うと病気になったり悪いことが起きたりする。","夜間の薄暗い道での見誤りや、身近な家畜への怪異的妄想から。"],
+["妖怪","ヒタチ","沖縄本島など","夕暮れ時に現れ、子供をさらっていく未確認の怪異。","夕暮れ時の子供の迷子予防や誘拐防止の警鐘から生じた。"],
+["神様","アマミキヨ（阿摩美久）","沖縄本島（久高島・斎場御嶽など）","琉球開闢（かいびゃく）の創世女神。琉球列島と人間を造ったとされる。","琉球王国の国家神話として、島々の形成と王権の正当性を説明するために誕生。"],
+["神様","ミルク神（弥勒神）","八重山諸島など","ニライカナイから豊穣と幸福をもたらす黄色い面の福神。","仏教の弥勒菩薩信仰が琉球のニライカナイ信仰と融合して定着した。"],
+["神様","キンマモン","沖縄本島（王権神話）","琉球王国を守護し、祝女（ノロ）に宣託を与える至高の国家神。","琉球王国のノロ制度（神女組織）の頂点として国家統治のために祀られた。"],
+["神様","火の神（ヒヌカン）","各家庭の台所","台所を守り、家庭の出来事を天の神に報告する最も身近な女神。","家庭生活の根幹である「火」と「食」への感謝から生まれた。"],
+["神様","ニライカナイの神々","東の海の彼方（異界）","海の向こうから生命や五穀の種子、幸福をもたらす来訪神。","海洋国家である沖縄の人々が、豊かな海と生命の源泉に寄せた信仰から誕生。"]
+]
+};
+
+/* 参考資料（画面左下の「参考資料」ボタンに表示。追加・編集できます） */
+const REFERENCES = [
+  "神話・妖怪の名称、場所、内容、誕生経緯：提供資料「日本神話伝説」（北海道〜沖縄の地方別一覧）",
+  "地図：資料の日本地図画像を取得できなかったため、日本列島の形を参考に、手描き風のSVGで作図したデザイン地図です（実際の地形・縮尺とは異なります）",
+  "イラスト：現在は未掲載です。掲載する場合は、DATAの各項目の後ろに「画像URL・出典名・出典URL」を追加すると、詳細画面に出典つきで表示されます（Wikimedia Commonsの鳥山石燕『画図百鬼夜行』など、利用条件を確認できるものを推奨）"
+];
+
+/* ===================== ここから下は動作コード ===================== */
+const W=1200,H=1000;
+const vp=document.getElementById('viewport');
+const world=document.getElementById('world');
+const pinsEl=document.getElementById('pins');
+const labelsEl=document.getElementById('labels');
+let scale=1, tx=0, ty=0;
+const MIN=0.4, MAX=4;
+let labelsOn=false, moved=false;
+
+/* ピン配置：妖怪は地方の中心の左寄り、神様は右寄りに、円弧状に並べる */
+const items=[];
+Object.entries(DATA).forEach(([region,list])=>{
+  const c=REGIONS[region];
+  ["妖怪","神様"].forEach((cat,side)=>{
+    const arr=list.filter(d=>d[0]===cat);
+    arr.forEach((d,i)=>{
+      const n=arr.length;
+      const a=(-70+140*(i/(n-1)))*Math.PI/180;      // 縦方向の円弧
+      const dir=side===0?-1:1;
+      const rad=c.r*(i%2?0.55:0.8);
+      const px=c.x+dir*(c.r*0.42+Math.cos(a)*rad*0.6);
+      const py=c.y+Math.sin(a)*c.r*0.95;
+      items.push({region,cat,name:d[1],loc:d[2],content:d[3],origin:d[4],image:d[5],srcName:d[6],srcUrl:d[7],x:px,y:py});
+    });
+  });
+});
+
+items.forEach(it=>{
+  const p=document.createElement('div');
+  p.className='pin '+(it.cat==="神様"?'kami':'yokai');
+  p.style.left=it.x+'px'; p.style.top=it.y+'px';
+  p.dataset.cat=it.cat==="神様"?'kami':'yokai';
+  const dot=document.createElement('div');
+  dot.className='dot'; dot.tabIndex=0; dot.setAttribute('role','button');
+  dot.setAttribute('aria-label',it.name);
+  dot.textContent=it.cat==="神様"?'神':'妖';
+  const tag=document.createElement('div');
+  tag.className='tag'; tag.textContent=it.name.replace(/[（(].*$/,'');
+  p.append(dot,tag);
+  dot.addEventListener('click',()=>{ if(!moved) openSheet(it); });
+  dot.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){e.preventDefault();openSheet(it);} });
+  pinsEl.appendChild(p);
+});
+
+Object.entries(REGIONS).forEach(([name,c])=>{
+  const l=document.createElement('div');
+  l.className='region-label'; l.textContent=name;
+  l.style.left=c.x+'px'; l.style.top=(c.y-c.r-24)+'px';
+  labelsEl.appendChild(l);
+});
+
+/* パン＆ズーム */
+function apply(){
+  world.style.transform=`translate(${tx}px,${ty}px) scale(${scale})`;
+  world.style.setProperty('--inv',(1/Math.max(scale,0.75)).toFixed(3));
+  document.body.classList.toggle('show-labels', labelsOn || scale>=1.8);
+}
+function clamp(){
+  const vw=vp.clientWidth, vh=vp.clientHeight, m=120;
+  tx=Math.min(vw-m, Math.max(m-W*scale, tx));
+  ty=Math.min(vh-m, Math.max(m-H*scale, ty));
+}
+function zoomAt(cx,cy,ns){
+  ns=Math.min(MAX,Math.max(MIN,ns));
+  const k=ns/scale;
+  tx=cx-(cx-tx)*k; ty=cy-(cy-ty)*k; scale=ns; clamp(); apply();
+}
+function fit(){
+  const vw=vp.clientWidth, vh=vp.clientHeight;
+  scale=Math.max(MIN,Math.min(vw/W, vh/H)*1.02);
+  tx=(vw-W*scale)/2; ty=(vh-H*scale)/2; clamp(); apply();
+}
+function flyTo(x,y,s){
+  const vw=vp.clientWidth, vh=vp.clientHeight;
+  world.style.transition='transform .5s cubic-bezier(.3,.7,.2,1)';
+  scale=s; tx=vw/2-x*s; ty=vh*0.42-y*s; clamp(); apply();
+  setTimeout(()=>world.style.transition='',520);
+}
+
+const pointers=new Map(); let lastDist=0, startPt=null;
+vp.addEventListener('pointerdown',e=>{
+  vp.setPointerCapture?.(e.pointerId);
+  pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pointers.size===1){ moved=false; startPt={x:e.clientX,y:e.clientY}; }
+  if(pointers.size===2){ const [a,b]=[...pointers.values()]; lastDist=Math.hypot(a.x-b.x,a.y-b.y); moved=true; }
+});
+vp.addEventListener('pointermove',e=>{
+  if(!pointers.has(e.pointerId)) return;
+  const prev=pointers.get(e.pointerId);
+  pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pointers.size===1){
+    if(!moved && Math.hypot(e.clientX-startPt.x,e.clientY-startPt.y)>6){ moved=true; vp.classList.add('dragging'); }
+    if(moved){ tx+=e.clientX-prev.x; ty+=e.clientY-prev.y; clamp(); apply(); }
+  } else if(pointers.size===2){
+    const [a,b]=[...pointers.values()];
+    const d=Math.hypot(a.x-b.x,a.y-b.y);
+    if(lastDist) zoomAt((a.x+b.x)/2,(a.y+b.y)/2,scale*d/lastDist);
+    lastDist=d;
+  }
+});
+function up(e){
+  pointers.delete(e.pointerId); lastDist=0; vp.classList.remove('dragging');
+  setTimeout(()=>{ if(pointers.size===0) moved=false; },0);
+}
+vp.addEventListener('pointerup',up); vp.addEventListener('pointercancel',up);
+vp.addEventListener('wheel',e=>{ e.preventDefault();
+  zoomAt(e.clientX,e.clientY,scale*(e.deltaY<0?1.12:1/1.12)); },{passive:false});
+
+document.getElementById('zin').onclick=()=>zoomAt(vp.clientWidth/2,vp.clientHeight/2,scale*1.3);
+document.getElementById('zout').onclick=()=>zoomAt(vp.clientWidth/2,vp.clientHeight/2,scale/1.3);
+document.getElementById('zreset').onclick=fit;
+window.addEventListener('resize',()=>{clamp();apply();});
+
+/* 地方ナビ */
+const nav=document.getElementById('regionNav');
+Object.entries(REGIONS).forEach(([name,c])=>{
+  const b=document.createElement('button'); b.textContent=name;
+  b.onclick=()=>flyTo(c.x,c.y,2.3);
+  nav.appendChild(b);
+});
+
+/* フィルター */
+document.querySelectorAll('.filters [data-f]').forEach(b=>{
+  b.onclick=()=>{
+    document.querySelectorAll('.filters [data-f]').forEach(x=>x.setAttribute('aria-pressed',x===b));
+    const f=b.dataset.f;
+    pinsEl.querySelectorAll('.pin').forEach(p=>p.classList.toggle('hidden',f!=='all'&&p.dataset.cat!==f));
+  };
+});
+const lbl=document.getElementById('lblToggle');
+lbl.onclick=()=>{ labelsOn=!labelsOn; lbl.setAttribute('aria-pressed',labelsOn); apply(); };
+
+/* 詳細シート */
+const back=document.getElementById('sheetBack'), sheet=document.getElementById('sheet');
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function openSheet(it){
+  const k=it.cat==="神様"?'kami':'yokai';
+  let img='';
+  if(it.image){
+    img=`<figure class="illust"><img src="${esc(it.image)}" alt="${esc(it.name)}" loading="lazy">
+    <figcaption>出典・参考資料：<a href="${esc(it.srcUrl||'#')}" target="_blank" rel="noopener">${esc(it.srcName||'出典')}</a></figcaption></figure>`;
+  }
+  sheet.innerHTML=`<button class="x" aria-label="閉じる">×</button>
+    <h2>${esc(it.name)}</h2>
+    <div><span class="badge ${k}">${esc(it.cat)}</span><span class="badge">${esc(it.region)}</span></div>
+    <dl>
+      <dt>場所</dt><dd>${esc(it.loc)}</dd>
+      <dt>内容</dt><dd>${esc(it.content)}</dd>
+      <dt>誕生経緯</dt><dd>${esc(it.origin)}</dd>
+    </dl>${img}`;
+  back.classList.add('open');
+  sheet.querySelector('.x').onclick=closeSheet;
+  sheet.scrollTop=0;
+}
+function openRefs(){
+  sheet.innerHTML=`<button class="x" aria-label="閉じる">×</button><h2>参考資料</h2>
+    <ul class="refs">${REFERENCES.map(r=>`<li>${esc(r)}</li>`).join('')}</ul>`;
+  back.classList.add('open'); sheet.querySelector('.x').onclick=closeSheet;
+}
+function closeSheet(){ back.classList.remove('open'); }
+back.addEventListener('click',e=>{ if(e.target===back) closeSheet(); });
+window.addEventListener('keydown',e=>{ if(e.key==='Escape') closeSheet(); });
+document.getElementById('refBtn').onclick=openRefs;
+
+fit();
+setTimeout(()=>{document.getElementById('hint').style.opacity=0;},4500);
+</script>
+</body>
+</html>
